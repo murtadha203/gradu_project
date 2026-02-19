@@ -144,7 +144,7 @@ def plot_results(history: List[Dict], metrics_log: Dict[str, List], output_dir: 
 def run_StrategicOrchestrator_validation(
     scenario_type: str = "URLLC_STORM",
     duration: int = 2000,
-    seed: int = 42
+    seed: int = 907
 ):
     print(f"--- [StrategicOrchestrator] Validation Run: {scenario_type} ---")
     

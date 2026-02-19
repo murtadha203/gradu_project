@@ -27,7 +27,7 @@ class SymbolicEstimator:
         
         if arrival_rate > 50.0: # Arbitrary high surge
             return TrafficState.URLLC_SURGE
-        if load > 0.8:
+        if load > 0.7: # Tuned down from 0.8 to be proactive
             return TrafficState.CONGESTED
         if load < 0.2:
             return TrafficState.LOW
@@ -35,7 +35,8 @@ class SymbolicEstimator:
 
     def _estimate_reliability(self, metrics: Dict[str, float]) -> ReliabilityState:
         # Check explicit RSRP floor (Leading Indicator for Cell Failure)
-        if metrics.get('rsrp', -80.0) < -110.0:
+        # Tuned from -110.0 to -95.0 for "Paranoid" safety
+        if metrics.get('rsrp', -80.0) < -95.0:
             return ReliabilityState.DANGER
 
         if metrics.get('rlf_rate', 0.0) > 0.05:

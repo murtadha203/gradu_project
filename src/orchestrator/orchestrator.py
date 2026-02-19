@@ -34,12 +34,16 @@ class StrategicOrchestrator:
         # Initialize Orchestrator components
         
         # 1. Initialize Tactical Layer (Tier 1)
-        self.tactical = TacticalExecutor(checkpoint_path, device=device)
-        
         # 2. Initialize Strategic Nodes (Tier 2)
         self.estimator_node = EstimatorNode()
         self.strategist_node = StrategistNode()
         self.shield_node = ShieldNode()
+        if checkpoint_path is None:
+             checkpoint_path = "models/ho_policy.pth"
+        
+        self.device = device
+        # 1. Initialize Tactical Layer (Tier 1)
+        self.tactical = TacticalExecutor(checkpoint_path, device)
         self.configurator_node = ConfiguratorNode(self.tactical)
         
         # 3. Build LangGraph Workflow
@@ -49,8 +53,12 @@ class StrategicOrchestrator:
         self.state = {
             "step": 0,
             "current_mode": ControlMode.BALANCED.value,
+            "applied_params": {},
             "history": []
         }
+        
+        # Puppeteer State (For external access)
+        self.current_weights = {"alpha": 0.33, "beta": 0.33, "gamma": 0.34}
         
     def _build_graph(self) -> StateGraph:
         """Construct the LangGraph workflow for the strategic loop."""
@@ -71,27 +79,23 @@ class StrategicOrchestrator:
         
         return workflow.compile()
         
-    def step(self, metrics: Dict[str, float], observation: Any, decision_interval: int = 500, verbose: bool = False) -> int:
+    def step(self, metrics: Dict[str, float], observation: Any, context: Dict[str, Any] = None, decision_interval: int = 100, force_run: bool = False, verbose: bool = False) -> int:
         """
         Execute one control step.
-        
-        Args:
-            metrics: Raw simulation metrics (RSRP, Power, Latency, etc.)
-            observation: Agent's observation vector (raw).
-            decision_interval: How often to run the strategic layer (default 500 steps = 5.0s).
-            verbose: Enable debug logging.
-            
-        Returns:
-            action: The selected cell index (Tier 1 output).
+        Supports 'Puppeteer' mode where Tier 2 outputs weights for Tier 1.
         """
         self.state["step"] += 1
         
         # --- Strategic Loop (Tier 2) ---
-        # Run only every N steps to match LLM latency and avoid oscillation
-        if self.state["step"] % decision_interval == 0:
-            if verbose:
-                print(f"[Orchestrator] Running Strategic Cycle at Step {self.state['step']}")
-
+        # Run if interval met OR forced by Panic Button
+        if force_run or (self.state["step"] % decision_interval == 0):
+            if verbose or force_run:
+                trigger = "PANIC" if force_run else "TIMER"
+                print(f"[Orchestrator] Running Strategic Cycle ({trigger}) at Step {self.state['step']}")
+                
+            if force_run:
+                print(f"[ALERT] SYSTEM 2 INTERRUPT TRIGGERED: RSRP/Load Critical")
+            
             # Prepare initial state for the graph
             graph_input = {
                 "step": self.state["step"],
@@ -108,12 +112,22 @@ class StrategicOrchestrator:
             self.state.update(final_state)
             
             # CRITICAL: Update State of Truth
-            # The Orchestrator's current_mode must mirror the Shield's enforced mode
+            print(f"[Orchestrator] Step {self.state['step']}: Mode -> {self.state.get('final_mode')}")
             self.state["current_mode"] = self.state.get("final_mode", self.state["current_mode"])
-        
+            
+            # Update Puppeteer Weights State for External Consumption
+            params = self.state.get("applied_params", {})
+            if "weights" in params:
+                self.current_weights = params["weights"]
+            
         # --- Tactical Action (Tier 1) ---
-        # The TacticalExecutor uses the maintained configuration
-        action = self.tactical.act(observation)
+        if observation is None:
+             return 0 
+        
+        # Pass Context for Reflex Guards
+        # Also pass current_mode for Dynamic Hysteresis (Survival = Agile, Green = Strict)
+        mode = self.state.get("current_mode", ControlMode.BALANCED.value)
+        action = self.tactical.act(observation, context=context, mode=mode)
         
         return action
 

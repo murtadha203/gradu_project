@@ -436,7 +436,13 @@ def main():
     print("COMPREHENSIVE BENCHMARK SUITE - NEW ARCHITECTURE")
     print("="*80)
     print(f"Episodes per data point: {NUM_EPISODES_PER_POINT}")
+    print(f"Episodes per data point: {NUM_EPISODES_PER_POINT}")
     print(f"Steps per episode: {STEPS_PER_EPISODE}")
+    
+    # Set Seeds
+    seed = 907
+    random.seed(seed)
+    np.random.seed(seed)
     
     # Run all tests
     df_congestion = test_congestion()

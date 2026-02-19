@@ -152,11 +152,30 @@ class MECAgentPPO(BasePPOAgent):
         if context is not None:
              # Check Throughput directly (captures both RSRP and SINR/Interference issues)
              throughput = context.get("serving_throughput_bps", 0.0)
+             rsrp = context.get("serving_rsrp_dbm", -100.0)
              
-             # If throughput is trash (< 1 Mbps), force LOCAL.
-             # Saving 15 Mbits at 0.1 Mbps takes 150 seconds = HUGE energy.
+             # GUARD 1: Trash Throughput (< 1 Mbps) -> FORCE LOCAL
              if throughput < 1e6: 
-                 return 0 # Local
+                 return 0 
+                 
+             # GUARD 2: Weak Signal (< -110 dBm) -> FORCE LOCAL
+             # Offloading on weak signal causes packet loss/retransmissions -> High Energy/Latency
+             if rsrp < -110.0:
+                 return 0
+                 
+             # GUARD 3: Strict Green Mode (Energy Critical) OR Low Battery -> FORCE LOCAL
+             # If Orchestrator signals Green Mode (beta >= 0.8) OR Battery < 40%, punish transmission heavily
+             intent = context.get("intent_weights")
+             battery_j = context.get('ue_battery_joules', 1000.0)
+             battery_pct = (battery_j / 1000.0) * 100.0
+
+             if battery_pct < 40.0:
+                 return 0 # CRITICAL: Low Battery -> Force Local
+                 
+             if intent:
+                 beta = intent.get('energy', 0.0)
+                 if beta >= 0.8:
+                     return 0 # Local Compute Only (Zero Tx Power)
         
         action, _, _ = BasePPOAgent.select_action(self, observation, training=training)
         return action
@@ -172,12 +191,20 @@ class MECAgentPPO(BasePPOAgent):
         # 2. Apply Guardrail Override
         if context is not None:
              throughput = context.get("serving_throughput_bps", 0.0)
+             rsrp = context.get("serving_rsrp_dbm", -100.0)
+             
              # Safety Override: Force Local (0) if Throughput < 1 Mbps
              if throughput < 1e6:
-                 # Override ACTION, but keep LOG_PROB and VALUE from the network.
-                 # This ensures PPO math remains valid (on-policy assumption mostly holds for value/prob)
-                 # even if the executed action was forced.
                  return 0, log_prob, value
+             if rsrp < -110.0:
+                 return 0, log_prob, value
+                 
+             # GUARD 3: Strict Green Mode
+             intent = context.get("intent_weights")
+             if intent:
+                 beta = intent.get('energy', 0.0)
+                 if beta >= 0.8:
+                     return 0, log_prob, value                  
         
         return action, log_prob, value
 

@@ -58,10 +58,37 @@ class ConfiguratorNode:
         mode_val = state.get("final_mode")
         mode = ControlMode(mode_val)
         
-        # Apply configuration
-        self.tactical.apply_mode(mode)
+        # Puppeteer Extraction: 
+        # Check if Brain provided explicit weights (Score-based)
+        weights = state.get("proposed_weights")
         
-        return {"config_applied": True, "active_params": {
+        if not weights:
+            # Fallback to Mode-based defaults
+            weights = {'alpha': 0.33, 'beta': 0.33, 'gamma': 0.34}
+            if mode == ControlMode.GREEN:
+                 weights = {'alpha': 0.05, 'beta': 0.90, 'gamma': 0.05}
+            elif mode == ControlMode.SURVIVAL:
+                 weights = {'alpha': 0.10, 'beta': 0.05, 'gamma': 0.85}
+
+        # Apply configuration (Including Weights)
+        # We pass the weights as an override to apply_mode
+        self.tactical.apply_mode(mode, overrides={"weights": weights})
+        
+        # Puppeteer Extraction: 
+        # In a real LLM, the Strategist would output JSON with continuous parameters.
+        # Since we are using Rule-Based Fallback for now (Mode -> Enum),
+        # we map the Mode to specific "Puppeteer Weights" here to simulate the LLM's intent.
+        
+        # Map Mode -> Continuous Weights
+        # Balanced: 0.33, 0.33, 0.34
+        # Green: 0.05, 0.90, 0.05 (Energy Focus)
+        # Survival: 0.10, 0.05, 0.85 (Reliability Focus)
+        
+        # In the future, 'reasoning' from LLM might contain specific tweaks
+        
+        return {"applied_params": {
+            "mode": mode.value,
+            "weights": weights,
             "margin": self.tactical.agent.handover_margin_db,
             "ttt": self.tactical.agent.time_to_trigger_s
         }}

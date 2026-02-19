@@ -11,7 +11,10 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 
 
-# Utility functions
+
+
+
+    # Utility functions
 def dbm_to_watts(dbm: float) -> float: 
     return 10 ** ((dbm - 30) / 10.0)
 
@@ -507,6 +510,26 @@ class NetworkSimulation:
         return UserEquipment(x=0.0, y=0.0, speed_mps=0.0, 
                             direction_rad=0.0, battery_joules=1000.0)
 
+    def _update_energy(self, duration_s: float, tx_active: bool = False):
+        """Update UE battery with realistic power model."""
+        if self.ue is None: return
+        
+        # Physics Fix: Idle Power + TX Power
+        IDLE_POWER_W = 0.3  # 300mW base drain (screen/modem standby)
+        
+        power_w = IDLE_POWER_W
+        if tx_active:
+             power_w += 2.5 # Add TX power
+             
+        energy_j = power_w * duration_s
+        self.ue.battery_joules = max(0.0, self.ue.battery_joules - energy_j)
+        
+    def _apply_ho_penalty(self):
+        """Apply energy cost for handover signaling."""
+        if self.ue is None: return
+        HO_COST_J = 0.2 # 200mJ signaling penalty
+        self.ue.battery_joules = max(0.0, self.ue.battery_joules - HO_COST_J)
+
     # ------------------------ radio model --------------------------------
 
     def _update_shadowing(self, distance_moved: float) -> None:
@@ -765,9 +788,9 @@ class NetworkSimulation:
 
         # Edge processing via serving cell
         elif offload_target == "edge":
+            mec = self.mec_servers[self.serving_cell_id]
             tx_rate_bps = max(serving_throughput_bps, 1e3)
             tx_time_s = task.data_size_bits / tx_rate_bps
-            mec = self.mec_servers[self.serving_cell_id]
             exec_time_s = task.cpu_cycles / (mec.cpu_ghz * 1e9)
             total_latency_s = tx_time_s + exec_time_s
             energy_j = tx_time_s * tx_power_w
@@ -921,7 +944,9 @@ class NetworkSimulation:
                     # Execute handover
                     self.serving_cell_id = ho_target
                     self.handover_history.append(self.current_time_s)
+                    self.handover_history.append(self.current_time_s)
                     handover_executed = True
+                    self._apply_ho_penalty() # Physics Fix: HO Cost
                     
                     # Reset pending state
                     self.pending_handover_target = None
@@ -949,6 +974,9 @@ class NetworkSimulation:
         # 3) Time & task arrival
         self.current_time_s += self.dt_s
         self.time_until_next_task_s -= self.dt_s
+        
+        # Physics Fix: Apply constant idle drain every step
+        self._update_energy(self.dt_s, tx_active=False)
 
         new_task = self._maybe_generate_task()
 
@@ -1086,6 +1114,54 @@ class NetworkSimulation:
         self.anomaly_traffic_multiplier = 1.0
         self.anomaly_cell_failure_id = None
         print(f"[Sim] Anomalies Cleared.")
+
+    def check_system_panic(self) -> Tuple[bool, str]:
+        """
+        Check for critical system failures (Reflex Layer).
+        Triggers if:
+        1. RSRP < -105 dBm (Signal Failure)
+        2. Cell Load > 85% (Congestion Collapse)
+        """
+        if self.ue is None: return False, ""
+        
+        # 1. RSRP Check
+        # We need to get current RSRP. We can use the last computed state if available?
+        # Recomputing might be expensive but safe.
+        # But we act on `context` usually.
+        # Let's peek at the Serving Cell's properties directly for speed (Reflex).
+        if self.serving_cell_id < 0: return True, "NO_SERVICE"
+        
+        # We need the UE's RSRP. 
+        # Context has it. 
+        # But if this is inside Sim, we can re-evaluate.
+        # For efficiency, let's just assume this is called AFTER step() or get_context()
+        # and we use the internal state?
+        # Actually, let's just use the logic the user gave.
+        
+        # Re-calculate RSRP?
+        # `_compute_radio_state` does it.
+        # Let's trust the current state if available.
+        # Or just calculate distance to serving cell.
+        
+        # The user's code snippet:
+        # current_load = self.base_stations[self.serving_cell_id].load
+        
+        bs = self.base_stations[self.serving_cell_id]
+        if bs.load_factor > 0.85:
+            return True, "CONGESTION_PANIC"
+            
+        # For RSRP, we might need the context or recompute.
+        # Let's rely on the caller passing RSRP? 
+        # Or recompute path loss.
+        dist = bs.distance_to(self.ue.x, self.ue.y)
+        pl = path_loss_db(dist)
+        rsrp = bs.tx_power_dbm - pl # Simplified (no noise/shadowing/fading for speed?)
+        # Or we can just access the last trace?
+        
+        if rsrp < -105.0:
+             return True, "RSRP_PANIC"
+             
+        return False, ""
 
 
 

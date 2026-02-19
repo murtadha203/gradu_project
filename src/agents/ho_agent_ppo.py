@@ -16,6 +16,8 @@ class HOAgentPPO(BasePPOAgent):
         # Initialize Base params
         self.num_cells = num_cells
         # Observation dimensions (includes throughput, RSRP, and intent weights)
+        # 5 per cell * 7 cells = 35
+        # Global: Speed, Battery, TimeSinceHO, CountHO, Alpha, Beta, Gamma = 7
         self.raw_obs_dim = 5 * num_cells + 7 
         self.frame_stack = frame_stack
         self.obs_dim = self.raw_obs_dim * frame_stack
@@ -41,6 +43,9 @@ class HOAgentPPO(BasePPOAgent):
         self.loss_history = []
         self.update_counter = 0
         self.episode_counter = 0
+        
+        # Puppeteer Weights (Internal State)
+        self.context_weights = {"alpha": 0.33, "beta": 0.33, "gamma": 0.34}
 
     def reset_stack(self):
         """Clear observation history (Call at start of episode)."""
@@ -148,15 +153,16 @@ class HOAgentPPO(BasePPOAgent):
             alpha = intent.get('latency', 0.33)
             beta = intent.get('energy', 0.33)
             gamma = intent.get('throughput', 0.34)
+            # print(f"DEBUG: Agent sees intent: {alpha:.2f}, {beta:.2f}, {gamma:.2f}")
         elif getattr(self, "context_weights", None):
-            alpha = self.context_weights.get("alpha", 0.5)
-            beta = self.context_weights.get("beta", 0.5)
-            gamma = self.context_weights.get("gamma", 0.0)
+            alpha = self.context_weights.get("alpha", 0.33)
+            beta = self.context_weights.get("beta", 0.33)
+            gamma = self.context_weights.get("gamma", 0.34)
         else:
-            user_pref = context.get("user_pref", {})
-            alpha = user_pref.get("latency_weight", 0.5)
-            beta = user_pref.get("energy_weight", 0.5)
-            gamma = 1.0 - alpha - beta if (alpha + beta) < 1.0 else 0.0
+            # Default to Balanced if no orders given
+            alpha = 0.33
+            beta = 0.33
+            gamma = 0.34
             
         features.extend([speed_norm, batt_norm, time_ho_norm, count_ho_norm, alpha, beta, gamma])
         

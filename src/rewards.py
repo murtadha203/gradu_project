@@ -23,6 +23,11 @@ def compute_shaped_reward(
 #  O-RAN INTENT MAPPING (PATH C: COMPLIANCE)
 # ============================================================================
 
+"""
+alpha = preformance / latency
+beta = energy
+gamma = reliability
+"""
 INTENT_MAP = {
     # 1. Performance Focus (eMBB)
     "MAXIMIZE_THROUGHPUT": {
@@ -258,10 +263,10 @@ def compute_ho_reward(
     # Combined Quality Score
     r_quality = 0.3 * r_rsrp + 0.3 * r_sinr + 0.4 * r_thr
     
-    # Outage Penalty (CRITICAL: Make staying in bad signal expensive but GRADIENT-FRIENDLY)
+    # Outage Penalty
     # If RSRP < -95 dBm, agent MUST consider switching
     if rsrp_after < -95.0:
-        r_quality -= 2.0  # Reduced from 50.0 to prevent scale explosion (-2 * 10 = -20)
+        r_quality -= 2.0  
     
     # 3. Stability Metrics (Ping-Pong)
     did_handover = (serving_cell_after != serving_cell_before)

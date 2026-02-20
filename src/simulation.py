@@ -68,6 +68,7 @@ class UserEquipment:
     direction_rad: float
     local_cpu_ghz: float = 0.5  # Reference local processing capability
     battery_joules: float = 1000.0  # Initial battery capacity
+    max_battery_joules: float = 1000.0  # Maximum battery capacity
 
     def step(self, dt_s: float, area_size: Tuple[float, float]) -> None:
         """Move UE with simple constant velocity model and reflecting borders."""
@@ -743,6 +744,7 @@ class NetworkSimulation:
             "ue_position": (self.ue.x, self.ue.y),
             "ue_speed_mps": self.ue.speed_mps,
             "ue_battery_joules": self.ue.battery_joules,  # For ContextAgent battery monitoring
+            "ue_max_battery_joules": self.ue.max_battery_joules,  # For ContextAgent battery monitoring
             "serving_cell_id": self.serving_cell_id,
             "handover_history": self.handover_history,  # For ping-pong detection
             "rsrp_dbm": radio_state["rsrp_dbm"],

@@ -285,6 +285,11 @@ class NetworkSimulation:
         self.T310_TIMER_S = 0.2                 # Time to trigger RLF (200ms)
         self.RLF_RECOVERY_TIME_S = 1.0          # Delay penalty for RLF
         
+        # Power Model Constants (Watts)
+        self.POWER_IDLE_W = 0.3      # Screen/Deep Sleep
+        self.POWER_TX_W = 2.5        # Active Transmission
+        self.POWER_CPU_W = 0.05      # Local Processing
+        
         # Topology and MEC servers are now initialized in reset(), not here
         self.intent_weights: Dict[str, float] = {'throughput': 0.34, 'latency': 0.33, 'energy': 0.33}
 
@@ -510,18 +515,12 @@ class NetworkSimulation:
         return UserEquipment(x=0.0, y=0.0, speed_mps=0.0, 
                             direction_rad=0.0, battery_joules=1000.0)
 
-    def _update_energy(self, duration_s: float, tx_active: bool = False):
-        """Update UE battery with realistic power model."""
+    def _update_idle_energy(self, duration_s: float):
+        """Update UE battery with baseline idle power drain."""
         if self.ue is None: return
         
-        # Physics Fix: Idle Power + TX Power
-        IDLE_POWER_W = 0.3  # 300mW base drain (screen/modem standby)
-        
-        power_w = IDLE_POWER_W
-        if tx_active:
-             power_w += 2.5 # Add TX power
-             
-        energy_j = power_w * duration_s
+        # Physics Fix: Always apply idle drain (screen/modem standby)
+        energy_j = self.POWER_IDLE_W * duration_s
         self.ue.battery_joules = max(0.0, self.ue.battery_joules - energy_j)
         
     def _apply_ho_penalty(self):
@@ -777,8 +776,21 @@ class NetworkSimulation:
             raise RuntimeError("Simulation not reset. Call reset() first.")
 
         # Energy model parameters
-        tx_power_w = 2.5
-        cpu_power_w = 0.05
+        tx_power_w = self.POWER_TX_W
+        cpu_power_w = self.POWER_CPU_W
+
+        # Check if battery is dead - if so, task fails immediately
+        if ue.battery_joules <= 0.0:
+            return {
+                "task_id": task.id,
+                "offload_target": "none",
+                "latency_s": task.deadline_s + 1.0, # Failed
+                "deadline_s": task.deadline_s - task.arrival_time_s,
+                "deadline_met": False,
+                "energy_j": 0.0,
+                "cell_congestion": 0.0,
+                "rsrp_dbm": -120.0
+            }
 
         # Local processing
         if offload_target == "local":
@@ -976,7 +988,7 @@ class NetworkSimulation:
         self.time_until_next_task_s -= self.dt_s
         
         # Physics Fix: Apply constant idle drain every step
-        self._update_energy(self.dt_s, tx_active=False)
+        self._update_idle_energy(self.dt_s)
 
         new_task = self._maybe_generate_task()
 

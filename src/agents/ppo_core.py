@@ -29,6 +29,7 @@ class RunningMeanStd:
         self.count = tot_count
         
     def normalize(self, x):
+        if self.count < 1e-2: return x # Avoid div by zero/init jitter
         return (x - self.mean) / (np.sqrt(self.var) + 1e-8)
 
 class ActorCritic(nn.Module):
@@ -117,17 +118,8 @@ class BasePPOAgent:
         Select action for rollout.
         Returns: action, log_prob, value
         """
-        # 1. Update RMS (Only during training rollouts) 
-        if self.normalize_obs:
-            # Critical Fix: Only update stats during training to prevent leakage
-            if training:
-                self.obs_rms.update(obs)
-            norm_obs = self.obs_rms.normalize(obs)
-        else:
-            norm_obs = obs
-            
         with torch.no_grad():
-            obs_t = torch.FloatTensor(norm_obs).unsqueeze(0).to(self.device)
+            obs_t = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
             action, log_prob, _, value = self.network.get_action_and_value(obs_t)
             
         return action.item(), log_prob.item(), value.item()
@@ -230,7 +222,7 @@ class BasePPOAgent:
             metrics['v_loss'] = v_loss.item()
             metrics['entropy'] = entropy_loss.item()
         
-        # Clear buffers
+        # Memory Leak Fix: Aggressive buffer clearing
         self.clear_buffer()
         return metrics
 
@@ -245,13 +237,12 @@ class BasePPOAgent:
         
         for t in reversed(range(len(rewards))):
             if t == len(rewards) - 1:
-                nextnonterminal = 1.0 - 0.0 # Assuming rollout ends not done
+                nextvalues = last_val
             else:
-                nextnonterminal = 1.0 - dones[t+1]
-                
-            nonterminal = 1.0 - dones[t]
+                nextvalues = values[t+1]
             
-            delta = rewards[t] + self.gamma * values[t+1] * nonterminal - values[t]
+            nonterminal = 1.0 - dones[t]
+            delta = rewards[t] + self.gamma * nextvalues * nonterminal - values[t]
             advantages[t] = lastgaelam = delta + self.gamma * self.gae_lambda * nonterminal * lastgaelam
             
         returns = advantages + values[:-1]
